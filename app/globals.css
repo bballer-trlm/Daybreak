@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0A0B0D;
+  --surface: #111318;
+  --surface-raised: #1A1E26;
+  --border: #252B36;
+  --text-primary: #E2E4E9;
+  --text-secondary: #8B91A0;
+  --text-muted: #4B5263;
+  --bullish: #22C55E;
+  --bullish-bg: #052E16;
+  --bearish: #EF4444;
+  --bearish-bg: #2C0A0A;
+  --breaking: #F59E0B;
+  --breaking-bg: #2D1A00;
+  --neutral: #6B7280;
+  --accent: #0EA5E9;
+  --accent-dim: #0369A1;
+  --accent-bg: #041E2E;
+  --space-2xs: 2px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
+  --space-3xl: 48px;
+}
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--text-primary);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  background-color: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-geist-sans), sans-serif;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes panelSlideIn {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.feed-row:hover {
+  background-color: var(--surface-raised) !important;
+}
