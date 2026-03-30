@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "worker:start": "tsx --env-file=.env.local workers/ingestion/index.ts",
+    "worker:dev": "tsx --env-file=.env.local workers/ingestion/dev.ts",
     "worker:feeds": "tsx --env-file=.env.local workers/ingestion/feeds/run.ts",
     "worker:pipeline": "tsx --env-file=.env.local workers/ingestion/pipeline.run.ts"
   },
