@@ -63,6 +63,13 @@ html, body {
   background-color: var(--surface-raised) !important;
 }
 
+/* Detail panel close button */
+.panel-close:hover {
+  color: var(--text-primary) !important;
+  background-color: var(--surface-raised) !important;
+  border-radius: 2px;
+}
+
 /* Focus-visible rings — keyboard navigation */
 button:focus-visible,
 a:focus-visible {

@@ -281,6 +281,7 @@ export default function DetailPanel({ article, onClose }: Props) {
         </span>
         <button
           onClick={onClose}
+          className="panel-close"
           style={{
             background: "none",
             border: "none",
