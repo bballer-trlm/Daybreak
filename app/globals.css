@@ -58,3 +58,39 @@ html, body {
 .feed-row:hover {
   background-color: var(--surface-raised) !important;
 }
+
+/* Sidebar rail tooltips */
+.sidebar-icon {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  padding: 8px 0;
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.sidebar-icon::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: var(--font-geist-mono), monospace;
+  padding: 3px 7px;
+  border-radius: 2px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 100ms ease;
+  z-index: 100;
+}
+
+.sidebar-icon:hover::after {
+  opacity: 1;
+}

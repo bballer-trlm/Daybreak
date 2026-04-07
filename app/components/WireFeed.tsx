@@ -21,11 +21,17 @@ export default function WireFeed({ initialArticles }: Props) {
     new Date(b.published_at ?? b.created_at).getTime() -
     new Date(a.published_at ?? a.created_at).getTime();
 
+  const curatedArticles = articles.filter(
+    (a) => a.importance_score != null && a.status !== "SCREENED_OUT"
+  );
+
+  const missCount = articles.filter(
+    (a) => a.status === "DONE" && (a.importance_score == null || a.importance_score < 30)
+  ).length;
+
   const visibleArticles =
     tab === "curated"
-      ? [...articles]
-          .filter((a) => a.importance_score != null && a.status !== "SCREENED_OUT")
-          .sort(byTime)
+      ? [...curatedArticles].sort(byTime)
       : [...articles].sort(byTime);
 
   useEffect(() => {
@@ -180,28 +186,24 @@ export default function WireFeed({ initialArticles }: Props) {
 
         <div style={{ flex: 1 }} />
 
-        <span
-          style={{
-            fontSize: "10px",
-            fontFamily: "var(--font-geist-mono)",
-            color: "var(--text-muted)",
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-          }}
-        >
-          {visibleArticles.length} articles
-        </span>
-
-        <span
-          style={{
-            fontSize: "10px",
-            fontFamily: "var(--font-geist-mono)",
-            color: "var(--text-muted)",
-            marginLeft: "16px",
-          }}
-        >
-          J/K navigate
-        </span>
+        {missCount > 0 && tab === "curated" && (
+          <button
+            onClick={() => setTab("wire")}
+            style={{
+              fontSize: "10px",
+              fontFamily: "var(--font-geist-mono)",
+              color: "var(--accent)",
+              background: "var(--accent-bg)",
+              border: "1px solid var(--accent-dim)",
+              borderRadius: "2px",
+              padding: "2px 7px",
+              cursor: "pointer",
+              marginRight: "8px",
+            }}
+          >
+            ↑ {missCount} Misses
+          </button>
+        )}
       </div>
 
       {/* Column headers */}
@@ -232,14 +234,20 @@ export default function WireFeed({ initialArticles }: Props) {
           <div
             style={{
               display: "flex",
+              flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
               height: "200px",
-              fontSize: "13px",
-              color: "var(--text-muted)",
+              gap: "8px",
             }}
           >
-            Waiting for articles...
+            <div style={{ fontSize: "18px", opacity: 0.3 }}>◎</div>
+            <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
+              Listening for market news…
+            </div>
+            <div style={{ fontSize: "11px", fontFamily: "var(--font-geist-mono)", color: "var(--text-muted)", opacity: 0.6 }}>
+              Feed updates in real-time
+            </div>
           </div>
         ) : (
           visibleArticles.map((article) => (

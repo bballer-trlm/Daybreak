@@ -6,6 +6,22 @@ type SidebarState = "full" | "rail";
 
 const WIDTHS: Record<SidebarState, number> = { full: 200, rail: 40 };
 
+function IconChevronLeft() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9,2 4,7 9,12" />
+    </svg>
+  );
+}
+
+function IconChevronRight() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="5,2 10,7 5,12" />
+    </svg>
+  );
+}
+
 function IconStar() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -50,9 +66,6 @@ export default function Sidebar() {
 
   const width = WIDTHS[state];
   const isFull = state === "full";
-  const isHidden = false;
-
-  const toggleIcon = isFull ? "‹" : "›";
 
   return (
     <div
@@ -71,7 +84,7 @@ export default function Sidebar() {
       {/* Toggle button */}
       <button
         onClick={cycle}
-        title={isFull ? "Collapse sidebar" : isHidden ? "Show sidebar" : "Expand sidebar"}
+        title={isFull ? "Collapse sidebar" : "Expand sidebar"}
         style={{
           height: "36px",
           width: "100%",
@@ -84,19 +97,60 @@ export default function Sidebar() {
           borderBottom: "1px solid var(--border)",
           cursor: "pointer",
           color: "var(--text-muted)",
-          fontSize: "14px",
           flexShrink: 0,
         }}
       >
-        {toggleIcon}
+        {isFull ? <IconChevronLeft /> : <IconChevronRight />}
       </button>
 
-      {/* Content — hidden in "hidden" state */}
-      {!isHidden && (
-        <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
-          {/* Watchlist */}
-          <div style={{ padding: isFull ? "12px 12px 4px" : "8px 0 4px" }}>
-            {isFull ? (
+      <div style={{ flex: 1, overflowY: isFull ? "auto" : "hidden", overflowX: "hidden" }}>
+        {/* Watchlist */}
+        <div style={{ padding: isFull ? "12px 12px 4px" : "8px 0 4px" }}>
+          {isFull ? (
+            <div
+              style={{
+                fontSize: "10px",
+                fontFamily: "var(--font-geist-mono)",
+                color: "var(--text-muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+                marginBottom: "8px",
+              }}
+            >
+              Watchlist
+            </div>
+          ) : (
+            <div className="sidebar-icon" data-tooltip="Watchlist">
+              <IconStar />
+            </div>
+          )}
+
+          {isFull && (
+            <div
+              style={{
+                fontSize: "12px",
+                color: "var(--text-muted)",
+                fontStyle: "italic",
+                padding: "4px 0",
+              }}
+            >
+              No tickers added
+            </div>
+          )}
+        </div>
+
+        <div
+          style={{
+            height: "1px",
+            backgroundColor: "var(--border)",
+            margin: isFull ? "8px 0" : "8px 8px",
+          }}
+        />
+
+        {/* Keyboard shortcuts */}
+        <div style={{ padding: isFull ? "4px 12px 12px" : "4px 0 8px" }}>
+          {isFull ? (
+            <>
               <div
                 style={{
                   fontSize: "10px",
@@ -107,100 +161,44 @@ export default function Sidebar() {
                   marginBottom: "8px",
                 }}
               >
-                Watchlist
+                Shortcuts
               </div>
-            ) : (
-              <div
-                style={{ display: "flex", justifyContent: "center", color: "var(--text-muted)", padding: "4px 0" }}
-                title="Watchlist"
-              >
-                <IconStar />
-              </div>
-            )}
-
-            {isFull && (
-              <div
-                style={{
-                  fontSize: "12px",
-                  color: "var(--text-muted)",
-                  fontStyle: "italic",
-                  padding: "4px 0",
-                }}
-              >
-                No tickers added
-              </div>
-            )}
-          </div>
-
-          <div
-            style={{
-              height: "1px",
-              backgroundColor: "var(--border)",
-              margin: isFull ? "8px 0" : "8px 8px",
-            }}
-          />
-
-          {/* Keyboard shortcuts */}
-          <div style={{ padding: isFull ? "4px 12px 12px" : "4px 0 8px" }}>
-            {isFull ? (
-              <>
+              {SHORTCUTS.map(({ keys, label }) => (
                 <div
+                  key={keys}
                   style={{
-                    fontSize: "10px",
-                    fontFamily: "var(--font-geist-mono)",
-                    color: "var(--text-muted)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    marginBottom: "8px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "3px 0",
                   }}
                 >
-                  Shortcuts
-                </div>
-                {SHORTCUTS.map(({ keys, label }) => (
-                  <div
-                    key={keys}
+                  <span
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "3px 0",
+                      fontSize: "10px",
+                      fontFamily: "var(--font-geist-mono)",
+                      color: "var(--text-muted)",
+                      backgroundColor: "var(--surface-raised)",
+                      padding: "1px 5px",
+                      borderRadius: "2px",
+                      border: "1px solid var(--border)",
                     }}
                   >
-                    <span
-                      style={{
-                        fontSize: "10px",
-                        fontFamily: "var(--font-geist-mono)",
-                        color: "var(--text-muted)",
-                        backgroundColor: "var(--surface-raised)",
-                        padding: "1px 5px",
-                        borderRadius: "2px",
-                        border: "1px solid var(--border)",
-                      }}
-                    >
-                      {keys}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "11px",
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      {label}
-                    </span>
-                  </div>
-                ))}
-              </>
-            ) : (
-              <div
-                style={{ display: "flex", justifyContent: "center", color: "var(--text-muted)", padding: "4px 0" }}
-                title="Shortcuts"
-              >
-                <IconKeyboard />
-              </div>
-            )}
-          </div>
+                    {keys}
+                  </span>
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                    {label}
+                  </span>
+                </div>
+              ))}
+            </>
+          ) : (
+            <div className="sidebar-icon" data-tooltip="Shortcuts">
+              <IconKeyboard />
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
