@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { Article, ArticleWithEntities, EntityTag } from "@/lib/supabase/types";
 import FeedRow from "./FeedRow";
 import DetailPanel from "./DetailPanel";
+import Sidebar from "./Sidebar";
 
 interface Props {
   initialArticles: ArticleWithEntities[];
@@ -126,6 +127,7 @@ export default function WireFeed({ initialArticles }: Props) {
         flexDirection: "row",
       }}
     >
+    <Sidebar />
     {/* Feed column */}
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}>
       {/* Feed header */}

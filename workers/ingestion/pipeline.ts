@@ -28,7 +28,7 @@ async function writeEnrichment(
   const supabase = getSupabaseAdmin();
   const { error } = await supabase
     .from("article_enrichments")
-    .insert({ article_id: articleId, stage_type: stageType, data });
+    .upsert({ article_id: articleId, stage_type: stageType, data }, { onConflict: "article_id,stage_type" });
   if (error) throw new Error(`Failed to write enrichment: ${error.message}`);
 }
 
