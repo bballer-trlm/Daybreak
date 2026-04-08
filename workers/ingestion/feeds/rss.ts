@@ -9,16 +9,7 @@ export interface FeedConfig {
   url: string;
 }
 
-export const FEEDS: FeedConfig[] = [
-  {
-    source: "Yahoo Finance",
-    url: "https://finance.yahoo.com/news/rssindex",
-  },
-  {
-    source: "MarketWatch",
-    url: "https://feeds.marketwatch.com/marketwatch/topstories/",
-  },
-];
+export const FEEDS: FeedConfig[] = [];
 
 // Workers use the service role key — no Database generic needed since the
 // service role bypasses RLS and we type the insert manually below.
