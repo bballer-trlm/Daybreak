@@ -95,7 +95,7 @@ async function runScreener(article: {
 }): Promise<ScreenerResult> {
   const secHint =
     article.source === "SEC EDGAR"
-      ? "\nNote: This is an SEC regulatory filing. Form 8-K, 10-K, 10-Q, S-1, and large insider transactions (Form 4) are always at least minor relevance."
+      ? "\nNote: This is an SEC regulatory filing. Form 8-K, 10-K, 10-Q, S-1, large insider transactions (Form 4), and 424B4 (firm commitment offerings — stock dilution/decline signal) are always at least minor relevance. EXCEPTION: 424B2, 424B3, 424B5, FWP, and other shelf prospectus supplement forms are boilerplate with no news value → always noise, pass: false."
       : "";
 
   const system = `You are a financial news screener for a hedge fund trading desk.
@@ -220,6 +220,59 @@ Respond ONLY with valid JSON (no markdown, no explanation):
   );
 }
 
+// ---------- Stage 3.5: Summarization ----------
+
+interface SummaryResult {
+  summary: string;       // 2–3 sentence plain-English summary of the article
+  key_points: string[];  // 2–4 trader-relevant callouts, each ≤12 words
+}
+
+async function runSummarization(article: {
+  title: string;
+  body: string | null;
+  source: string;
+  category: string | null;
+  entities: ExtractedEntity[];
+  sec_items?: string[];
+  sec_item_labels?: string[];
+}): Promise<SummaryResult> {
+  const entitiesCtx = article.entities
+    .slice(0, 3)
+    .map((e) => `${e.name}${e.ticker ? ` (${e.ticker})` : ""}: ${e.analysis}`)
+    .join("; ");
+
+  const secCtx =
+    article.sec_items && article.sec_items.length > 0
+      ? `\nFiling items: ${article.sec_items.map((no, i) => `${no} – ${article.sec_item_labels?.[i] ?? no}`).join(", ")}`
+      : "";
+
+  const system = `You are a financial news analyst summarizing articles for equity traders.
+Write a concise, factual summary and extract the most tradeable callouts.
+
+Respond ONLY with valid JSON:
+{
+  "summary": string,      // 2–3 plain-English sentences covering who, what, and market impact
+  "key_points": string[]  // 2–4 bullet callouts, each ≤12 words, trader-focused (numbers, % changes, ratings, items)
+}
+
+Rules:
+- Lead with the most market-moving fact
+- Use concrete numbers/percentages from the text when available
+- Never say "the article says" or "according to" — state facts directly
+- key_points should be self-contained without reading the summary first`;
+
+  return callJson<SummaryResult>(
+    MODEL_FAST,
+    system,
+    `Title: ${article.title}
+Source: ${article.source}
+Category: ${article.category ?? "general"}${secCtx}
+Entities: ${entitiesCtx || "(none)"}
+Body: ${article.body?.slice(0, 1000) ?? "(no body)"}`,
+    512,
+  );
+}
+
 // ---------- Stage 4: Importance Score ----------
 
 interface ScoresResult {
@@ -256,7 +309,8 @@ Scoring guide:
 - 70–89: Earnings beats/misses >5% (8-K Item 2.02), large M&A (>$5B, Item 2.01), major regulatory actions, delisting notice (Item 3.01), S-1 from notable company
 - 50–69: Analyst upgrades/downgrades, smaller M&A, sector-moving data, 10-K/10-Q from major company, executive departure (Item 5.02), Reg FD (Item 7.01)
 - 30–49: Minor earnings, product launches, routine Form 4 insider transactions, small company 8-K
-- 0–29: Routine filings, minor analyst notes, boilerplate disclosures`;
+- 30–49: 424B4 firm commitment offering (dilutive secondary — minor bearish signal for the issuer)
+- 0–29: Routine filings, minor analyst notes, boilerplate disclosures, 424B2/424B3/424B5 prospectus supplements (always 0–5), FWP free writing prospectuses`;
 
   const topEntities = article.entities
     .slice(0, 3)
@@ -339,7 +393,7 @@ export async function processArticle(articleId: string): Promise<void> {
         secContent as unknown as Record<string, unknown>
       );
       console.log(
-        `[pipeline] SEC content fetched for ${articleId}: form=${secContent.form_type} items=[${secContent.items_found.join(",")}]`
+        `[pipeline] SEC content fetched for ${articleId}: form=${secContent!.form_type} items=[${secContent!.items_found.join(",")}]`
       );
     } catch (err) {
       // Non-fatal: log and continue with the placeholder body
@@ -397,6 +451,22 @@ export async function processArticle(articleId: string): Promise<void> {
   } catch (err) {
     await writeFailedEnrichment(articleId, "entities", null, (err as Error).message);
     // Non-fatal: continue to scoring with what we have
+  }
+
+  // Stage 3.5: Summarization (Haiku) — non-fatal
+  try {
+    const summaryResult = await runSummarization({
+      title: article.title,
+      body: secContent?.primary_text ?? article.body,
+      source: article.source,
+      category,
+      entities,
+      sec_items: secContent?.items_found,
+      sec_item_labels: secContent?.item_labels,
+    });
+    await writeEnrichment(articleId, "summary", summaryResult as unknown as Record<string, unknown>);
+  } catch (err) {
+    console.warn(`[pipeline] Summarization failed for ${articleId}: ${(err as Error).message}`);
   }
 
   // Stage 4: Importance scoring (Haiku)

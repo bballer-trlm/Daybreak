@@ -22,7 +22,7 @@ export default function WireFeed({ initialArticles }: Props) {
     new Date(a.published_at ?? a.created_at).getTime();
 
   const curatedArticles = articles.filter(
-    (a) => a.importance_score != null && a.status !== "SCREENED_OUT"
+    (a) => a.importance_score != null && a.importance_score >= 40 && a.status !== "SCREENED_OUT"
   );
 
   const missCount = articles.filter(

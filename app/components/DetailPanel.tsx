@@ -198,6 +198,18 @@ function PipelineStrip({
   );
 }
 
+interface SecContentData {
+  form_type?: string;
+  items_found?: string[];
+  item_labels?: string[];
+  primary_text?: string;
+}
+
+interface SummaryData {
+  summary?: string;
+  key_points?: string[];
+}
+
 export default function DetailPanel({ article, onClose }: Props) {
   const [enrichments, setEnrichments] = useState<EnrichmentRow[]>([]);
   const [impacts, setImpacts] = useState<EntityImpactDetail[]>([]);
@@ -239,6 +251,14 @@ export default function DetailPanel({ article, onClose }: Props) {
   }, [article.id]);
 
   const ts = article.published_at ?? article.created_at;
+  const enrichmentMap = Object.fromEntries(enrichments.map((e) => [e.stage_type, e.data]));
+  const urgencyReason = enrichmentMap["scores"]?.urgency_reason as string | undefined;
+  const secContent = enrichmentMap["sec_content"] as SecContentData | undefined;
+  const summaryData = enrichmentMap["summary"] as SummaryData | undefined;
+  const secItems: { no: string; label: string }[] = (secContent?.items_found ?? []).map((no, i) => ({
+    no,
+    label: secContent?.item_labels?.[i] ?? no,
+  }));
 
   return (
     <div
@@ -315,26 +335,43 @@ export default function DetailPanel({ article, onClose }: Props) {
             style={{
               marginTop: "6px",
               display: "flex",
+              alignItems: "center",
               gap: "12px",
               fontSize: "11px",
               fontFamily: "var(--font-geist-mono)",
               color: "var(--text-muted)",
+              flexWrap: "wrap",
             }}
           >
             <span>{formatDate(ts)}</span>
             <span>{formatTime(ts)}</span>
             <span>{article.source}</span>
-            {article.url && (
-              <a
-                href={article.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: "var(--accent)", textDecoration: "none" }}
-              >
-                ↗
-              </a>
-            )}
           </div>
+          {article.url && (
+            <a
+              href={article.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                marginTop: "10px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                fontSize: "12px",
+                fontFamily: "var(--font-geist-mono)",
+                color: "var(--accent)",
+                textDecoration: "none",
+                border: "1px solid var(--accent-dim)",
+                borderRadius: "3px",
+                padding: "5px 10px",
+                backgroundColor: "var(--accent-bg)",
+                fontWeight: 500,
+              }}
+            >
+              View Source
+              <span style={{ fontSize: "14px", lineHeight: 1 }}>↗</span>
+            </a>
+          )}
         </div>
 
         {/* Pipeline strip */}
@@ -344,6 +381,84 @@ export default function DetailPanel({ article, onClose }: Props) {
           entities={impacts}
           importanceScore={article.importance_score}
         />
+
+        {/* Significance — why this scored / was curated */}
+        {urgencyReason && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <div
+              style={{
+                fontSize: "10px",
+                fontFamily: "var(--font-geist-mono)",
+                color: "var(--text-muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              Significance
+            </div>
+            <p
+              style={{
+                fontSize: "12px",
+                color: "var(--text-primary)",
+                lineHeight: 1.5,
+                margin: 0,
+                padding: "8px 10px",
+                backgroundColor: "var(--surface-raised)",
+                borderLeft: "2px solid var(--accent)",
+                borderRadius: "0 3px 3px 0",
+              }}
+            >
+              {urgencyReason}
+            </p>
+          </div>
+        )}
+
+        {/* SEC filing item callouts */}
+        {secItems.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <div
+              style={{
+                fontSize: "10px",
+                fontFamily: "var(--font-geist-mono)",
+                color: "var(--text-muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              Filing Items
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              {secItems.map((item) => (
+                <div
+                  key={item.no}
+                  style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: "8px",
+                    fontSize: "12px",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--font-geist-mono)",
+                      fontSize: "10px",
+                      color: "var(--accent)",
+                      backgroundColor: "var(--accent-bg)",
+                      border: "1px solid var(--accent-dim)",
+                      borderRadius: "2px",
+                      padding: "1px 5px",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {item.no}
+                  </span>
+                  <span style={{ color: "var(--text-secondary)" }}>{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Entity impacts */}
         {impacts.length > 0 && (
@@ -412,8 +527,8 @@ export default function DetailPanel({ article, onClose }: Props) {
           </div>
         )}
 
-        {/* Body text */}
-        {article.body && (
+        {/* AI Summary + Key Points */}
+        {summaryData?.summary ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             <div
               style={{
@@ -434,11 +549,74 @@ export default function DetailPanel({ article, onClose }: Props) {
                 margin: 0,
               }}
             >
+              {summaryData.summary}
+            </p>
+            {summaryData.key_points && summaryData.key_points.length > 0 && (
+              <ul
+                style={{
+                  margin: "4px 0 0",
+                  padding: 0,
+                  listStyle: "none",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "5px",
+                }}
+              >
+                {summaryData.key_points.map((pt, i) => (
+                  <li
+                    key={i}
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: "7px",
+                      fontSize: "12px",
+                      color: "var(--text-primary)",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    <span
+                      style={{
+                        color: "var(--accent)",
+                        fontFamily: "var(--font-geist-mono)",
+                        fontSize: "10px",
+                        flexShrink: 0,
+                      }}
+                    >
+                      ▸
+                    </span>
+                    {pt}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : article.body ? (
+          /* Fallback to raw body while summary is processing */
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            <div
+              style={{
+                fontSize: "10px",
+                fontFamily: "var(--font-geist-mono)",
+                color: "var(--text-muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              {article.status === "DONE" ? "Summary" : "Processing…"}
+            </div>
+            <p
+              style={{
+                fontSize: "12px",
+                color: "var(--text-secondary)",
+                lineHeight: 1.6,
+                margin: 0,
+              }}
+            >
               {article.body.slice(0, 600)}
               {article.body.length > 600 && "…"}
             </p>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

@@ -20,7 +20,8 @@ export type StageType =
   | "scores"
   | "research"
   | "earnings"
-  | "sec_content";
+  | "sec_content"
+  | "summary";
 
 export type RelevanceTier = "material" | "minor" | "noise";
 
