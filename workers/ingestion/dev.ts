@@ -5,6 +5,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { pollAllFeeds } from "./feeds/rss";
+import { pollAllEdgarFeeds } from "./feeds/edgar";
 import { processArticle } from "./pipeline";
 
 const FEED_INTERVAL_MS = 60_000;
@@ -50,6 +51,7 @@ async function processPending(): Promise<void> {
 async function tick(): Promise<void> {
   console.log(`\n[dev-worker] ${new Date().toISOString()} — polling feeds...`);
   await pollAllFeeds();
+  await pollAllEdgarFeeds();
   await processPending();
 }
 

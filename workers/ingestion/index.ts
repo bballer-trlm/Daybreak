@@ -2,6 +2,7 @@ import { Client } from "pg";
 import { processArticle } from "./pipeline";
 import { getRedisConnectionOptions, createIngestQueue, createIngestWorker } from "./queue";
 import { pollAllFeeds } from "./feeds/rss";
+import { pollAllEdgarFeeds } from "./feeds/edgar";
 
 const SAFETY_NET_INTERVAL_MS = 30_000;
 
@@ -79,10 +80,12 @@ async function main() {
     process.exit(0);
   });
 
-  // RSS feed poller: initial poll on startup, then every 60 seconds
-  console.log("[worker] Starting RSS feed poller...");
+  // RSS + EDGAR feed pollers: initial poll on startup, then every 60 seconds
+  console.log("[worker] Starting RSS + EDGAR feed pollers...");
   await pollAllFeeds();
+  await pollAllEdgarFeeds();
   setInterval(pollAllFeeds, 60_000);
+  setInterval(pollAllEdgarFeeds, 60_000);
 
   console.log("[worker] Ready. Listening for articles...");
 }

@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
 import type { StageType, RelevanceTier } from "../../lib/supabase/types";
+import { fetchSecContent, type SecContent } from "./edgar-fetcher";
 
 const MODEL_FAST = "claude-haiku-4-5-20251001"; // screener + classifier
 const MODEL_SMART = "claude-sonnet-4-6"; // entity extraction + scoring
@@ -90,7 +91,13 @@ interface ScreenerResult {
 async function runScreener(article: {
   title: string;
   body: string | null;
+  source: string;
 }): Promise<ScreenerResult> {
+  const secHint =
+    article.source === "SEC EDGAR"
+      ? "\nNote: This is an SEC regulatory filing. Form 8-K, 10-K, 10-Q, S-1, and large insider transactions (Form 4) are always at least minor relevance."
+      : "";
+
   const system = `You are a financial news screener for a hedge fund trading desk.
 Evaluate whether a news article is relevant to equity markets and worth full AI analysis.
 
@@ -102,10 +109,10 @@ Respond ONLY with valid JSON:
 }
 
 Guidelines:
-- "material": breaking news, earnings, M&A, Fed decisions, major geopolitical events → pass: true
-- "minor": analyst upgrades/downgrades, product launches, minor data releases → pass: true
+- "material": breaking news, earnings, M&A, Fed decisions, major geopolitical events, SEC 8-K filings from notable companies → pass: true
+- "minor": analyst upgrades/downgrades, product launches, minor data releases, routine SEC filings (Form 4 for small amounts) → pass: true
 - "noise": sports, entertainment, unrelated world news, duplicates → pass: false
-Target pass rate: ~60%.`;
+Target pass rate: ~60%.${secHint}`;
 
   return callJson<ScreenerResult>(
     MODEL_FAST,
@@ -140,6 +147,23 @@ Breaking = truly market-moving news requiring immediate trader attention (earnin
     system,
     `Title: ${article.title}`
   );
+}
+
+// ---------- Stage 2.5: SEC Content Fetch ----------
+// Only runs for SEC EDGAR articles. Fetches the actual filing document,
+// parses 8-K item numbers, and returns enriched text for downstream stages.
+
+async function runSecContentFetch(
+  article: { url: string; title: string; body: string | null }
+): Promise<SecContent | null> {
+  // Parse form type and company from the body metadata
+  // Body format: "SEC Form 8-K (Material Events) filed by COMPANY on DATE..."
+  const formTypeMatch = article.body?.match(/SEC Form (\S+)/);
+  const companyMatch = article.body?.match(/filed by (.+?) on /);
+  const formType = formTypeMatch?.[1] ?? "8-K";
+  const company = companyMatch?.[1] ?? article.title.replace(/\s+files Form .+/, "");
+
+  return fetchSecContent(article.url, formType, company);
 }
 
 // ---------- Stage 3: Entity Extraction ----------
@@ -208,7 +232,16 @@ async function runScoring(article: {
   relevance_tier: RelevanceTier;
   is_breaking: boolean;
   entities: ExtractedEntity[];
+  sec_items?: string[];  // 8-K item numbers found in filing
+  sec_item_labels?: string[];
 }): Promise<ScoresResult> {
+  const secItemsContext =
+    article.sec_items && article.sec_items.length > 0
+      ? `\nSEC Filing Items: ${article.sec_items
+          .map((no, i) => `${no} (${article.sec_item_labels?.[i] ?? ""})`)
+          .join(", ")}`
+      : "";
+
   const system = `You are a trading desk head prioritizing news for 50 traders.
 Assign an overall importance score to this article.
 
@@ -219,11 +252,11 @@ Respond ONLY with valid JSON:
 }
 
 Scoring guide:
-- 90–100: Fed decisions, systemic risk events, major geopolitical crises
-- 70–89: Earnings beats/misses >5%, large M&A (>$5B), major regulatory actions
-- 50–69: Analyst upgrades/downgrades, smaller M&A, sector-moving data
-- 30–49: Minor earnings, product launches, exec changes
-- 0–29: Routine filings, minor analyst notes, low-signal color`;
+- 90–100: Fed decisions, systemic risk events, major geopolitical crises, bankruptcy (8-K Item 1.03), change of control (Item 5.01)
+- 70–89: Earnings beats/misses >5% (8-K Item 2.02), large M&A (>$5B, Item 2.01), major regulatory actions, delisting notice (Item 3.01), S-1 from notable company
+- 50–69: Analyst upgrades/downgrades, smaller M&A, sector-moving data, 10-K/10-Q from major company, executive departure (Item 5.02), Reg FD (Item 7.01)
+- 30–49: Minor earnings, product launches, routine Form 4 insider transactions, small company 8-K
+- 0–29: Routine filings, minor analyst notes, boilerplate disclosures`;
 
   const topEntities = article.entities
     .slice(0, 3)
@@ -235,7 +268,7 @@ Scoring guide:
     system,
     `Title: ${article.title}
 Breaking: ${article.is_breaking}
-Relevance tier: ${article.relevance_tier}
+Relevance tier: ${article.relevance_tier}${secItemsContext}
 Top entities:\n${topEntities || "(none)"}`
   );
 }
@@ -260,7 +293,7 @@ export async function processArticle(articleId: string): Promise<void> {
 
   // Stage 1 + 2: Screener + Classifier in parallel (both fast/cheap on Haiku)
   const [screenerResult, classifierResult] = await Promise.allSettled([
-    runScreener({ title: article.title, body: article.body }),
+    runScreener({ title: article.title, body: article.body, source: article.source }),
     runClassifier({ title: article.title }),
   ]);
 
@@ -293,17 +326,46 @@ export async function processArticle(articleId: string): Promise<void> {
       .eq("id", articleId);
   }
 
+  // Stage 2.5: SEC Content Fetch (EDGAR articles only)
+  // Fetches the actual filing document and extracts 8-K items + key text.
+  let secContent: SecContent | null = null;
+  if (article.source === "SEC EDGAR") {
+    try {
+      await updateArticleStatus(articleId, "ENRICHING");
+      secContent = await runSecContentFetch(article);
+      await writeEnrichment(
+        articleId,
+        "sec_content",
+        secContent as unknown as Record<string, unknown>
+      );
+      console.log(
+        `[pipeline] SEC content fetched for ${articleId}: form=${secContent.form_type} items=[${secContent.items_found.join(",")}]`
+      );
+    } catch (err) {
+      // Non-fatal: log and continue with the placeholder body
+      console.warn(
+        `[pipeline] SEC content fetch failed for ${articleId}: ${(err as Error).message}`
+      );
+    }
+  }
+
   // Stage 3: Entity extraction (Sonnet)
+  // For SEC articles, use the fetched filing text if available.
+  const entityBody = secContent?.primary_text ?? article.body;
+
   let entities: ExtractedEntity[] = [];
   try {
     await updateArticleStatus(articleId, "ENRICHING");
-    const entitiesResult = await runEntityExtraction({ title: article.title, body: article.body, category });
+    const entitiesResult = await runEntityExtraction({
+      title: article.title,
+      body: entityBody,
+      category,
+    });
     entities = entitiesResult.entities;
     await writeEnrichment(articleId, "entities", { entities });
 
     // Upsert entities + entity_impacts
     for (const entity of entities) {
-      // Find or create entity in DB
       let entityId: string;
       const { data: existing } = await supabase
         .from("entities")
@@ -344,6 +406,8 @@ export async function processArticle(articleId: string): Promise<void> {
       relevance_tier: screener.relevance_tier,
       is_breaking: isBreaking,
       entities,
+      sec_items: secContent?.items_found,
+      sec_item_labels: secContent?.item_labels,
     });
     await writeEnrichment(articleId, "scores", scores as unknown as Record<string, unknown>);
     await supabase
