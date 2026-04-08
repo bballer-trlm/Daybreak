@@ -13,6 +13,7 @@ export type ArticleStatus =
   | "FAILED_PERMANENT";
 
 export type StageType =
+  | "rules"
   | "screener"
   | "classifier"
   | "entities"
@@ -37,6 +38,7 @@ export interface Article {
   is_breaking: boolean;
   importance_score: number | null;
   category: string | null;
+  content_hash: string | null;
   created_at: string;
 }
 

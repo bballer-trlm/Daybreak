@@ -1,7 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
+import { createHash } from "crypto";
 import type { StageType, RelevanceTier } from "../../lib/supabase/types";
 import { fetchSecContent, type SecContent } from "./edgar-fetcher";
+import { runRuleEngine, type RulesResult } from "./rules";
 
 const MODEL_FAST = "claude-haiku-4-5-20251001"; // screener + classifier
 const MODEL_SMART = "claude-sonnet-4-6"; // entity extraction + scoring
@@ -60,6 +62,13 @@ async function updateArticleStatus(articleId: string, status: string) {
     .eq("id", articleId);
 }
 
+// ---------- Helpers ----------
+
+function computeContentHash(text: string): string {
+  const normalized = text.toLowerCase().replace(/\s+/g, " ").trim();
+  return createHash("sha256").update(normalized).digest("hex");
+}
+
 // ---------- Prompt helpers ----------
 
 async function callJson<T>(
@@ -88,14 +97,18 @@ interface ScreenerResult {
   reason: string;
 }
 
-async function runScreener(article: {
-  title: string;
-  body: string | null;
-  source: string;
-}): Promise<ScreenerResult> {
+async function runScreener(
+  article: { title: string; body: string | null; source: string },
+  rules?: RulesResult
+): Promise<ScreenerResult> {
   const secHint =
     article.source === "SEC EDGAR"
       ? "\nNote: This is an SEC regulatory filing. Form 8-K, 10-K, 10-Q, S-1, large insider transactions (Form 4), and 424B4 (firm commitment offerings — stock dilution/decline signal) are always at least minor relevance."
+      : "";
+
+  const rulesHint =
+    rules && rules.event_type !== "none"
+      ? `\nRule engine pre-classified: event_type="${rules.event_type}" (${rules.event_type_confidence} confidence)${rules.is_market_moving_candidate ? ", flagged market-moving" : ""}.`
       : "";
 
   const system = `You are a financial news screener for a hedge fund trading desk.
@@ -112,7 +125,7 @@ Guidelines:
 - "material": breaking news, earnings, M&A, Fed decisions, major geopolitical events, SEC 8-K filings from notable companies → pass: true
 - "minor": analyst upgrades/downgrades, product launches, minor data releases, routine SEC filings (Form 4 for small amounts) → pass: true
 - "noise": sports, entertainment, unrelated world news, duplicates → pass: false
-Target pass rate: ~60%.${secHint}`;
+Target pass rate: ~60%.${secHint}${rulesHint}`;
 
   return callJson<ScreenerResult>(
     MODEL_FAST,
@@ -285,8 +298,9 @@ async function runScoring(article: {
   relevance_tier: RelevanceTier;
   is_breaking: boolean;
   entities: ExtractedEntity[];
-  sec_items?: string[];  // 8-K item numbers found in filing
+  sec_items?: string[];
   sec_item_labels?: string[];
+  rules?: RulesResult;
 }): Promise<ScoresResult> {
   const secItemsContext =
     article.sec_items && article.sec_items.length > 0
@@ -317,12 +331,17 @@ Scoring guide:
     .map((e) => `${e.name} (${e.ticker ?? e.type}): score ${e.impact_score}, ${e.analysis}`)
     .join("\n");
 
+  const rulesContext =
+    article.rules && article.rules.event_type !== "none"
+      ? `\nRule engine: event=${article.rules.event_type}, market_moving=${article.rules.is_market_moving_candidate}, signals=[${article.rules.market_moving_signals.join(", ")}]`
+      : "";
+
   return callJson<ScoresResult>(
     MODEL_FAST,
     system,
     `Title: ${article.title}
 Breaking: ${article.is_breaking}
-Relevance tier: ${article.relevance_tier}${secItemsContext}
+Relevance tier: ${article.relevance_tier}${rulesContext}${secItemsContext}
 Top entities:\n${topEntities || "(none)"}`
   );
 }
@@ -345,9 +364,35 @@ export async function processArticle(articleId: string): Promise<void> {
 
   await updateArticleStatus(articleId, "PROCESSING");
 
+  // Stage 0: Rule engine (synchronous, ~1ms, no API call)
+  // Runs before everything — feeds deterministic hints to screener and scoring.
+  const rulesResult = runRuleEngine(article.title, article.body ?? "", article.source);
+  writeEnrichment(articleId, "rules", rulesResult as unknown as Record<string, unknown>).catch(
+    (e) => console.warn(`[pipeline] Rules enrichment write failed: ${(e as Error).message}`)
+  );
+
+  // Content hash dedup: catches same story from multiple sources (syndicated content).
+  // URL uniqueness handles exact-URL duplicates; this handles cross-URL duplicates.
+  if (article.body) {
+    const hash = computeContentHash(article.body);
+    await supabase.from("articles").update({ content_hash: hash }).eq("id", articleId);
+    const { data: dupe } = await supabase
+      .from("articles")
+      .select("id")
+      .eq("content_hash", hash)
+      .neq("id", articleId)
+      .eq("status", "DONE")
+      .maybeSingle();
+    if (dupe) {
+      await updateArticleStatus(articleId, "SCREENED_OUT");
+      console.log(`[pipeline] ${articleId} duplicate content of ${dupe.id} — skipping`);
+      return;
+    }
+  }
+
   // Stage 1 + 2: Screener + Classifier in parallel (both fast/cheap on Haiku)
   const [screenerResult, classifierResult] = await Promise.allSettled([
-    runScreener({ title: article.title, body: article.body, source: article.source }),
+    runScreener({ title: article.title, body: article.body, source: article.source }, rulesResult),
     runClassifier({ title: article.title }),
   ]);
 
@@ -478,6 +523,7 @@ export async function processArticle(articleId: string): Promise<void> {
       entities,
       sec_items: secContent?.items_found,
       sec_item_labels: secContent?.item_labels,
+      rules: rulesResult,
     });
     await writeEnrichment(articleId, "scores", scores as unknown as Record<string, unknown>);
     await supabase
