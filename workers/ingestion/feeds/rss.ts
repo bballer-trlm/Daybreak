@@ -9,7 +9,20 @@ export interface FeedConfig {
   url: string;
 }
 
-export const FEEDS: FeedConfig[] = [];
+export const FEEDS: FeedConfig[] = [
+  {
+    source: "NY Times",
+    url: "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
+  },
+  {
+    source: "NY Times",
+    url: "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml",
+  },
+  {
+    source: "NY Times",
+    url: "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
+  },
+];
 
 // Workers use the service role key — no Database generic needed since the
 // service role bypasses RLS and we type the insert manually below.
