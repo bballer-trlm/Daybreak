@@ -10,18 +10,23 @@ export interface FeedConfig {
 }
 
 export const FEEDS: FeedConfig[] = [
-  {
-    source: "NY Times",
-    url: "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
-  },
-  {
-    source: "NY Times",
-    url: "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml",
-  },
-  {
-    source: "NY Times",
-    url: "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
-  },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/AsiaPacific.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/Americas.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/Africa.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/Dealbook.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/Europe.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/MiddleEast.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/NYRegion.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/Obituaries.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/US.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/YourMoney.xml" },
+  { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml" },
 ];
 
 // Workers use the service role key — no Database generic needed since the
