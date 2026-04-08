@@ -12,15 +12,17 @@
  *   S-1   — IPO registration statements
  *   4     — Insider transactions (Form 4)
  *
- * SEC rate limit: 10 req/s. We poll every 60s with 500ms gaps between
- * feed types, so we're well under the limit.
+ * ATOM entry format (from live inspection):
+ *   title:   "8-K - Company Name (0001234567) (Filer)"
+ *   link:    "https://www.sec.gov/Archives/edgar/data/{CIK}/{accNoDash}/{acc}-index.htm"
+ *   id:      "urn:tag:sec.gov,2008:accession-number=0001234567-26-000001"
+ *   summary: HTML with Filed date, AccNo, and Item list (e.g. "Item 2.02: Results...")
  */
 
 import Parser from "rss-parser";
 import { createClient } from "@supabase/supabase-js";
 import type { ArticleInsert } from "../../../lib/supabase/types";
 
-// SEC requires a descriptive User-Agent
 const EDGAR_USER_AGENT = "Daybreak Market Research daybreak-research@outlook.com";
 
 const parser = new Parser({
@@ -70,47 +72,50 @@ function getSupabase() {
 }
 
 /**
- * Parse an EDGAR ATOM entry to extract company info and construct the
- * canonical filing index URL.
+ * Parse 8-K item descriptions out of the ATOM summary HTML.
+ * Summary contains lines like: "Item 2.02: Results of Operations..."
+ */
+function parseSummaryItems(summaryHtml: string): string[] {
+  const items: string[] = [];
+  const pattern = /Item\s+(\d+\.\d+):\s*([^<\n]+)/g;
+  let match;
+  while ((match = pattern.exec(summaryHtml)) !== null) {
+    items.push(`${match[1]}: ${match[2].trim()}`);
+  }
+  return items;
+}
+
+/**
+ * Parse a single EDGAR ATOM entry.
  *
- * ATOM id format:  urn:tag:sec.gov,2008:accession-number=0001234567-25-000001
- * Title format:    8-K filing for COMPANY NAME (CIK 0001234567)
+ * Title format:   "8-K - Company Name (0001234567) (Filer)"
+ * Link:           already the filing index URL — use directly
+ * id (not guid):  "urn:tag:sec.gov,2008:accession-number=0001234567-26-000001"
  */
 function parseEdgarEntry(
-  item: Parser.Item & { id?: string; guid?: string }
+  item: Parser.Item,
+  feedFormType: string
 ): {
   company: string;
-  cik: string;
-  cikNum: string;
-  accessionDashes: string;
-  accessionNoDashes: string;
+  formType: string;
   filingUrl: string;
+  summaryItems: string[];
 } | null {
-  const rawId = (item as Record<string, unknown>).id as string | undefined
-    ?? item.guid
-    ?? "";
   const title = item.title ?? "";
+  const filingUrl = item.link ?? "";
 
-  // Extract accession number from the ATOM <id> URN
-  const accMatch = rawId.match(/accession-number=([\d-]{20})/);
-  if (!accMatch) return null;
-  const accessionDashes = accMatch[1];
-  const accessionNoDashes = accessionDashes.replace(/-/g, "");
+  if (!filingUrl || !filingUrl.includes("/Archives/edgar/")) return null;
 
-  // Extract CIK from title (may have leading zeros)
-  const cikMatch = title.match(/\(CIK\s*(\d+)\)/i);
-  if (!cikMatch) return null;
-  const cik = cikMatch[1];
-  const cikNum = parseInt(cik, 10).toString(); // strip leading zeros for data path
+  // Title: "8-K - Company Name (CIK_DIGITS) (Filer)"
+  const titleMatch = title.match(/^([\w/\-]+)\s+-\s+(.+?)\s*\(\d+\)/);
+  const formType = titleMatch?.[1]?.trim() ?? feedFormType;
+  const company = titleMatch?.[2]?.trim() ?? title;
 
-  // Extract company name
-  const companyMatch = title.match(/filing for (.+?)\s*\(CIK/i);
-  const company = companyMatch ? companyMatch[1].trim() : "Unknown Company";
+  // Extract items from summary HTML (free context, no filing fetch needed)
+  const summaryHtml = (item as Record<string, unknown>).summary as string ?? "";
+  const summaryItems = parseSummaryItems(summaryHtml);
 
-  // Canonical EDGAR filing index URL (unique per filing, fetchable)
-  const filingUrl = `https://www.sec.gov/Archives/edgar/data/${cikNum}/${accessionNoDashes}/${accessionDashes}-index.htm`;
-
-  return { company, cik, cikNum, accessionDashes, accessionNoDashes, filingUrl };
+  return { company, formType, filingUrl, summaryItems };
 }
 
 export async function pollEdgarFeed(feed: EdgarFeedConfig): Promise<number> {
@@ -118,9 +123,7 @@ export async function pollEdgarFeed(feed: EdgarFeedConfig): Promise<number> {
   try {
     feedData = await parser.parseURL(feed.url);
   } catch (err) {
-    console.error(
-      `[edgar] ${feed.formType} feed failed: ${(err as Error).message}`
-    );
+    console.error(`[edgar] ${feed.formType} feed failed: ${(err as Error).message}`);
     return 0;
   }
 
@@ -128,25 +131,26 @@ export async function pollEdgarFeed(feed: EdgarFeedConfig): Promise<number> {
   let inserted = 0;
 
   for (const item of feedData.items) {
-    const parsed = parseEdgarEntry(
-      item as Parser.Item & { id?: string; guid?: string }
-    );
+    const parsed = parseEdgarEntry(item, feed.formType);
     if (!parsed) continue;
 
-    const { company, cikNum, accessionDashes, filingUrl } = parsed;
+    const { company, formType, filingUrl, summaryItems } = parsed;
     const filedAt = item.pubDate
       ? new Date(item.pubDate).toISOString()
       : new Date().toISOString();
 
-    // Title readable by the screener and traders
-    const title = `${company} files Form ${feed.formType} with SEC`;
+    const title = `${company} files Form ${formType} with SEC`;
 
-    // Body encodes filing metadata + context for the screener.
-    // The sec_content pipeline stage will replace this with actual filing text.
+    // Include items from the summary so the screener has real context immediately.
+    // The sec_content stage will later enrich with the full filing text.
+    const itemsContext =
+      summaryItems.length > 0
+        ? ` Items: ${summaryItems.join(" | ")}.`
+        : "";
+
     const body =
-      `SEC Form ${feed.formType} (${feed.label}) filed by ${company} on ` +
-      `${filedAt.slice(0, 10)}. Accession: ${accessionDashes}. ` +
-      `CIK: ${cikNum}. Full filing content fetched during enrichment.`;
+      `SEC Form ${formType} (${feed.label}) filed by ${company} on ${filedAt.slice(0, 10)}.` +
+      itemsContext;
 
     const row: ArticleInsert = {
       title,
@@ -165,7 +169,7 @@ export async function pollEdgarFeed(feed: EdgarFeedConfig): Promise<number> {
       .select("id");
 
     if (error) {
-      console.error(`[edgar] Insert error ${accessionDashes}: ${error.message}`);
+      console.error(`[edgar] Insert error ${filingUrl}: ${error.message}`);
       continue;
     }
     if (data && data.length > 0) inserted++;
@@ -180,7 +184,7 @@ export async function pollEdgarFeed(feed: EdgarFeedConfig): Promise<number> {
 export async function pollAllEdgarFeeds(): Promise<void> {
   for (const feed of EDGAR_FEEDS) {
     await pollEdgarFeed(feed);
-    // 500ms gap between feed types to stay well under SEC's 10 req/s limit
+    // 500ms gap between feed types to stay under SEC's 10 req/s limit
     await new Promise((r) => setTimeout(r, 500));
   }
 }
