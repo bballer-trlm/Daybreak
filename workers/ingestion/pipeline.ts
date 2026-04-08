@@ -95,7 +95,7 @@ async function runScreener(article: {
 }): Promise<ScreenerResult> {
   const secHint =
     article.source === "SEC EDGAR"
-      ? "\nNote: This is an SEC regulatory filing. Form 8-K, 10-K, 10-Q, S-1, large insider transactions (Form 4), and 424B4 (firm commitment offerings — stock dilution/decline signal) are always at least minor relevance. EXCEPTION: 424B2, 424B3, 424B5, FWP, and other shelf prospectus supplement forms are boilerplate with no news value → always noise, pass: false."
+      ? "\nNote: This is an SEC regulatory filing. Form 8-K, 10-K, 10-Q, S-1, large insider transactions (Form 4), and 424B4 (firm commitment offerings — stock dilution/decline signal) are always at least minor relevance."
       : "";
 
   const system = `You are a financial news screener for a hedge fund trading desk.

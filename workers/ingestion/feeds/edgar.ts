@@ -85,6 +85,16 @@ function parseSummaryItems(summaryHtml: string): string[] {
   return items;
 }
 
+// Form types to drop at ingestion — no market signal, pure boilerplate
+const BLOCKED_FORM_TYPES = new Set([
+  "424B2", "424B3", "424B5",  // shelf prospectus supplements (424B4 kept — dilutive offering signal)
+  "FWP",                       // free writing prospectus
+  "497", "497K",               // mutual fund prospectus / summary prospectus
+  "N-14", "N-14/A",           // mutual fund registration
+  "N-CEN", "N-CEN/A",         // annual report for registered investment companies
+  "N-PORT", "N-PORT/A",       // monthly portfolio holdings (funds)
+]);
+
 /**
  * Parse a single EDGAR ATOM entry.
  *
@@ -109,6 +119,8 @@ function parseEdgarEntry(
   // Title: "8-K - Company Name (CIK_DIGITS) (Filer)"
   const titleMatch = title.match(/^([\w/\-]+)\s+-\s+(.+?)\s*\(\d+\)/);
   const formType = titleMatch?.[1]?.trim() ?? feedFormType;
+
+  if (BLOCKED_FORM_TYPES.has(formType)) return null;
   const company = titleMatch?.[2]?.trim() ?? title;
 
   // Extract items from summary HTML (free context, no filing fetch needed)
