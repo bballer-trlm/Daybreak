@@ -5,7 +5,8 @@ import { pollAllFeeds } from "./feeds/rss";
 import { pollAllEdgarFeeds } from "./feeds/edgar";
 import { pollAllNytFeeds } from "./feeds/nyt";
 
-const SAFETY_NET_INTERVAL_MS = 30_000;
+const SAFETY_NET_INTERVAL_MS = 60_000;
+const SAFETY_NET_CUTOFF_MS = 5 * 60_000; // only pick up articles stuck for >5 min
 
 async function main() {
   console.log("[worker] Starting Daybreak ingestion worker...");
@@ -58,7 +59,7 @@ async function main() {
   );
 
   setInterval(async () => {
-    const cutoff = new Date(Date.now() - 30_000).toISOString();
+    const cutoff = new Date(Date.now() - SAFETY_NET_CUTOFF_MS).toISOString();
     const { data: stuck, error } = await supabase
       .from("articles")
       .select("id")
@@ -72,7 +73,9 @@ async function main() {
     if (stuck && stuck.length > 0) {
       console.log(`[worker] Safety-net: enqueuing ${stuck.length} stuck articles`);
       await Promise.all(
-        stuck.map((a) => queue.add("ingest", { articleId: a.id }))
+        stuck.map((a) =>
+          queue.add("ingest", { articleId: a.id }, { jobId: `article-${a.id}` })
+        )
       );
     }
   }, SAFETY_NET_INTERVAL_MS);
