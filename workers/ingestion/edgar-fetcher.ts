@@ -178,7 +178,11 @@ export async function fetchSecContent(
     throw new Error(`No fetchable document found in index for ${accessionDashes}`);
   }
 
-  const docUrl = `${baseUrl}/${targetDoc.href}`;
+  const docUrl = targetDoc.href.startsWith("http")
+    ? targetDoc.href
+    : targetDoc.href.startsWith("/")
+    ? `https://www.sec.gov${targetDoc.href}`
+    : `${baseUrl}/${targetDoc.href}`;
   const docHtml = await edgarFetch(docUrl);
   const rawText = stripHtml(docHtml);
 
