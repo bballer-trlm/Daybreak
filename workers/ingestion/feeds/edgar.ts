@@ -60,7 +60,7 @@ const EDGAR_FEEDS: EdgarFeedConfig[] = [
   {
     formType: "4",
     label: "Insider Transactions",
-    url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4&dateb=&owner=include&count=20&search_text=&output=atom",
+    url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4&dateb=&owner=include&count=10&search_text=&output=atom",
   },
 ];
 

@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
 import { createHash } from "crypto";
 import type { StageType, RelevanceTier } from "../../lib/supabase/types";
-import { fetchSecContent, type SecContent } from "./edgar-fetcher";
+import { fetchSecContent, fetchForm4Details, type SecContent } from "./edgar-fetcher";
 import { runRuleEngine, type RulesResult } from "./rules";
 
 const MODEL_FAST = "claude-haiku-4-5-20251001"; // screener + classifier
@@ -363,6 +363,49 @@ export async function processArticle(articleId: string): Promise<void> {
   }
 
   await updateArticleStatus(articleId, "PROCESSING");
+
+  // Stage 0.5: Form 4 early filter — fetch the XML and skip non-actionable insider transactions
+  // before spending any Claude API budget. Runs only for SEC EDGAR Form 4 filings.
+  if (article.source === "SEC EDGAR" && article.body?.includes("SEC Form 4")) {
+    const FORM4_MIN_DOLLARS = 500_000;   // $500K open-market trade minimum
+    const FORM4_MIN_PCT = 0.05;          // 5% of position minimum
+
+    let form4 = null;
+    try {
+      form4 = await fetchForm4Details(article.url);
+    } catch (err) {
+      console.warn(`[pipeline] Form 4 prefetch failed for ${articleId}: ${(err as Error).message}`);
+    }
+
+    if (form4) {
+      const dollarOk = form4.dollarValue !== null && form4.dollarValue >= FORM4_MIN_DOLLARS;
+      const pctOk = form4.percentOfPosition !== null && form4.percentOfPosition >= FORM4_MIN_PCT;
+      const isActionable = form4.isOpenMarket && (dollarOk || pctOk);
+
+      if (!isActionable) {
+        await updateArticleStatus(articleId, "SCREENED_OUT");
+        const reason = !form4.isOpenMarket
+          ? `non-market tx (${form4.transactionCode})`
+          : `below threshold: $${((form4.dollarValue ?? 0) / 1_000).toFixed(0)}K, ${((form4.percentOfPosition ?? 0) * 100).toFixed(1)}% of position`;
+        console.log(`[pipeline] ${articleId} Form 4 filtered: ${reason}`);
+        return;
+      }
+
+      // Enrich body for downstream AI stages with parsed transaction context
+      const direction = form4.acquiredDisposed === "D" ? "sold" : "bought";
+      const dollarsStr = form4.dollarValue != null
+        ? ` ($${(form4.dollarValue / 1_000_000).toFixed(2)}M)`
+        : "";
+      const pctStr = form4.percentOfPosition != null
+        ? `, ${(form4.percentOfPosition * 100).toFixed(1)}% of position`
+        : "";
+      article.body =
+        (article.body ?? "") +
+        `\nInsider transaction: ${form4.insiderTitle} ${form4.insiderName} ${direction} ` +
+        `${form4.totalShares.toLocaleString()} shares${dollarsStr}${pctStr}.`;
+      console.log(`[pipeline] ${articleId} Form 4 actionable: ${form4.insiderName} ${direction}${dollarsStr}`);
+    }
+  }
 
   // Stage 0: Rule engine (synchronous, ~1ms, no API call)
   // Runs before everything — feeds deterministic hints to screener and scoring.

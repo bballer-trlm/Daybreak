@@ -47,6 +47,21 @@ export interface SecContent {
   has_exhibit_99_1: boolean;
 }
 
+export interface Form4Details {
+  insiderName: string;
+  insiderTitle: string;
+  transactionCode: string;      // S=sale, P=purchase, A=award, M=exercise, G=gift, etc.
+  totalShares: number;
+  pricePerShare: number | null;
+  dollarValue: number | null;   // totalShares * pricePerShare
+  percentOfPosition: number | null; // shares / (shares + sharesOwnedAfter)
+  acquiredDisposed: "A" | "D";
+  isOpenMarket: boolean;        // true only for S and P
+}
+
+// Transaction codes that represent open-market trades (not grants/awards/exercises)
+const OPEN_MARKET_CODES = new Set(["S", "P"]);
+
 // ---------- Helpers ----------
 
 async function edgarFetch(url: string): Promise<string> {
@@ -205,4 +220,114 @@ export async function fetchSecContent(
     primary_text: primaryText,
     has_exhibit_99_1: hasExhibit,
   };
+}
+
+// ---------- Form 4 (insider transaction) parser ----------
+
+/**
+ * Extract a field from Form 4 XML. Handles both formats:
+ *   <tag><value>X</value></tag>  (most numeric/coded fields)
+ *   <tag>X</tag>                 (transactionCode, simple strings)
+ */
+function extractF4Value(xml: string, tag: string): string | null {
+  const withValue = xml.match(new RegExp(`<${tag}[^>]*>\\s*<value>\\s*([^<]+?)\\s*<\\/value>`, "i"));
+  if (withValue) return withValue[1].trim();
+  const direct = xml.match(new RegExp(`<${tag}[^>]*>\\s*([^<\\s][^<]*)\\s*<\\/${tag}>`, "i"));
+  return direct ? direct[1].trim() : null;
+}
+
+function parseNum(s: string | null): number {
+  if (!s) return 0;
+  const n = parseFloat(s.replace(/,/g, ""));
+  return isNaN(n) ? 0 : n;
+}
+
+function parseForm4Xml(xml: string): Form4Details | null {
+  // Insider identity
+  const insiderName = extractF4Value(xml, "rptOwnerName") ?? "Unknown";
+  const officerTitle = extractF4Value(xml, "officerTitle") ?? "";
+  const isDirector = extractF4Value(xml, "isDirector") === "1";
+  const isTenPct = extractF4Value(xml, "isTenPercentOwner") === "1";
+  const insiderTitle =
+    officerTitle || (isTenPct ? "10% Owner" : isDirector ? "Director" : "Insider");
+
+  // Aggregate across all non-derivative transactions in the filing
+  const txPattern = /<nonDerivativeTransaction>([\s\S]*?)<\/nonDerivativeTransaction>/gi;
+  let txMatch;
+  let totalShares = 0;
+  let totalValue = 0;
+  let hasPrice = false;
+  let transactionCode = "";
+  let acquiredDisposed: "A" | "D" = "D";
+  let sharesOwnedAfter = 0;
+
+  while ((txMatch = txPattern.exec(xml)) !== null) {
+    const tx = txMatch[1];
+    const code = tx.match(/<transactionCode>\s*([^<\s]+)\s*<\/transactionCode>/i)?.[1]?.trim() ?? "";
+    const shares = parseNum(extractF4Value(tx, "transactionShares"));
+    const price = parseNum(extractF4Value(tx, "transactionPricePerShare"));
+    const ad = tx.match(
+      /<transactionAcquiredDisposedCode>[^<]*<value>\s*([AD])\s*<\/value>/i
+    )?.[1] as "A" | "D" | undefined;
+    const owned = parseNum(extractF4Value(tx, "sharesOwnedFollowingTransaction"));
+
+    if (code) transactionCode = code;
+    if (ad) acquiredDisposed = ad;
+    totalShares += shares;
+    if (price > 0) {
+      totalValue += shares * price;
+      hasPrice = true;
+    }
+    if (owned > sharesOwnedAfter) sharesOwnedAfter = owned;
+  }
+
+  if (!transactionCode && totalShares === 0) return null;
+
+  const dollarValue = hasPrice ? totalValue : null;
+  const pricePerShare = hasPrice && totalShares > 0 ? totalValue / totalShares : null;
+  const totalPosition = totalShares + sharesOwnedAfter;
+  const percentOfPosition = totalPosition > 0 ? totalShares / totalPosition : null;
+
+  return {
+    insiderName,
+    insiderTitle,
+    transactionCode,
+    totalShares,
+    pricePerShare,
+    dollarValue,
+    percentOfPosition,
+    acquiredDisposed,
+    isOpenMarket: OPEN_MARKET_CODES.has(transactionCode),
+  };
+}
+
+/**
+ * Fetch a Form 4 filing index and parse the XML to extract transaction details.
+ * Returns null on any failure — callers treat this as non-fatal.
+ */
+export async function fetchForm4Details(indexUrl: string): Promise<Form4Details | null> {
+  const parsed = parseIndexUrl(indexUrl);
+  if (!parsed) return null;
+  const { cik, accessionNoDashes } = parsed;
+  const baseUrl = `https://www.sec.gov/Archives/edgar/data/${cik}/${accessionNoDashes}`;
+
+  const indexHtml = await edgarFetch(indexUrl);
+  const docs = parseIndexDocs(indexHtml);
+
+  // Primary document for Form 4 is the XML (docType "4" or ".xml" extension)
+  const primaryDoc =
+    docs.find((d) => d.docType === "4") ??
+    docs.find((d) => d.href.toLowerCase().endsWith(".xml")) ??
+    docs[1];
+
+  if (!primaryDoc) return null;
+
+  const docUrl = primaryDoc.href.startsWith("http")
+    ? primaryDoc.href
+    : primaryDoc.href.startsWith("/")
+    ? `https://www.sec.gov${primaryDoc.href}`
+    : `${baseUrl}/${primaryDoc.href}`;
+
+  const xml = await edgarFetch(docUrl);
+  return parseForm4Xml(xml);
 }
