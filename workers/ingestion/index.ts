@@ -15,6 +15,10 @@ async function main() {
 
   // BullMQ worker: processes ArticleIngestJob
   const worker = createIngestWorker(redisOpts, async (job) => {
+    if (!job.data.articleId || typeof job.data.articleId !== 'string') {
+      console.warn(`[worker] Skipping job ${job.id}: invalid articleId`);
+      return; // Mark as completed without processing
+    }
     console.log(`[worker] Processing article ${job.data.articleId}`);
     await processArticle(job.data.articleId);
   });
