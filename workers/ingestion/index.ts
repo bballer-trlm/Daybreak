@@ -6,7 +6,8 @@ import { pollAllEdgarFeeds } from "./feeds/edgar";
 import { pollAllNytFeeds } from "./feeds/nyt";
 
 const SAFETY_NET_INTERVAL_MS = 60_000;
-const SAFETY_NET_CUTOFF_MS = 5 * 60_000; // only pick up articles stuck for >5 min
+const SAFETY_NET_RETRY_CUTOFF_MS = 5 * 60_000;   // articles stuck 5–60 min: retry
+const SAFETY_NET_ABANDON_CUTOFF_MS = 60 * 60_000; // articles stuck >60 min: give up
 
 async function main() {
   console.log("[worker] Starting Daybreak ingestion worker...");
@@ -59,12 +60,26 @@ async function main() {
   );
 
   setInterval(async () => {
-    const cutoff = new Date(Date.now() - SAFETY_NET_CUTOFF_MS).toISOString();
+    const retryCutoff = new Date(Date.now() - SAFETY_NET_RETRY_CUTOFF_MS).toISOString();
+    const abandonCutoff = new Date(Date.now() - SAFETY_NET_ABANDON_CUTOFF_MS).toISOString();
+
+    // Articles stuck >60 min: pipeline can't process them — mark FAILED_PERMANENT
+    const { error: abandonErr } = await supabase
+      .from("articles")
+      .update({ status: "FAILED_PERMANENT" })
+      .eq("status", "PENDING")
+      .lt("created_at", abandonCutoff);
+    if (abandonErr) {
+      console.error("[worker] Safety-net abandon error:", abandonErr.message);
+    }
+
+    // Articles stuck 5–60 min: re-queue with jobId dedup (BullMQ ignores if already queued)
     const { data: stuck, error } = await supabase
       .from("articles")
       .select("id")
       .eq("status", "PENDING")
-      .lt("created_at", cutoff);
+      .lt("created_at", retryCutoff)
+      .gte("created_at", abandonCutoff);
 
     if (error) {
       console.error("[worker] Safety-net poll error:", error.message);
