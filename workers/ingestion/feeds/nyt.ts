@@ -90,12 +90,27 @@ async function pollNytSection(section: string, apiKey: string): Promise<number> 
   return inserted;
 }
 
+// Poll only during US market hours: Mon–Fri, 7am–6pm ET
+function isMarketHours(): boolean {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "numeric",
+    hour12: false,
+  }).formatToParts(new Date());
+
+  const day = parts.find((p) => p.type === "weekday")?.value ?? "";
+  const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+
+  const isWeekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(day);
+  const isInHours = hour >= 7 && hour < 18; // 7:00am–5:59pm ET
+  return isWeekday && isInHours;
+}
+
 export async function pollAllNytFeeds(): Promise<void> {
   const apiKey = process.env.NYT_API_KEY;
-  if (!apiKey) {
-    // Silently skip — activates automatically once key is added to env
-    return;
-  }
+  if (!apiKey) return; // Silently skip — activates automatically once key is added to env
+  if (!isMarketHours()) return;
 
   for (const section of SECTIONS) {
     await pollNytSection(section, apiKey);

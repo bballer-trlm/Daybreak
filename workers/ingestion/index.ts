@@ -112,7 +112,7 @@ async function main() {
   await pollAllNytFeeds();
   setInterval(pollAllFeeds, 60_000);
   setInterval(pollAllEdgarFeeds, 60_000);
-  setInterval(pollAllNytFeeds, 15 * 60_000);
+  setInterval(pollAllNytFeeds, 5 * 60_000);
 
   console.log("[worker] Ready. Listening for articles...");
 }
