@@ -6,6 +6,14 @@
  *
  * Requires SYNOPTIC_API_KEY env var. Skips gracefully if not set.
  * Auto-reconnects with exponential backoff on disconnect or error.
+ *
+ * Message envelope: { event: string, data: { id, text, json, ... } }
+ * SEC filing text format:
+ *   Filed file: <accession>
+ *   CIK: <cik>
+ *   Type: <form-type>
+ *   Company Name: <name>
+ *   Link: <url>
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -15,20 +23,31 @@ const WS_URL = "wss://api.synoptic.com/v1/ws/on-stream-post";
 const RECONNECT_BASE_MS = 5_000;
 const RECONNECT_MAX_MS = 60_000;
 
-interface SynopticPost {
-  id?: string;
-  title?: string;
-  content?: string;
-  body?: string;
-  text?: string;
-  url?: string;
-  link?: string;
-  author?: string;
-  published_at?: string;
-  created_at?: string;
-  timestamp?: string;
-  source?: string;
-  [key: string]: unknown;
+// Mirror edgar.ts BLOCKED_FORM_TYPES — keep in sync
+const BLOCKED_FORM_TYPES = new Set([
+  "424B2", "424B3", "424B5",
+  "FWP",
+  "497", "497K",
+  "485BPOS", "485APOS", "485BXT",
+  "N-14", "N-14/A",
+  "N-CEN", "N-CEN/A",
+  "N-PORT", "N-PORT/A",
+]);
+
+interface SynopticEnvelope {
+  event: string;
+  data: {
+    id?: string;
+    text?: string;
+    [key: string]: unknown;
+  };
+}
+
+interface SecFiling {
+  accession: string | null;
+  formType: string | null;
+  company: string | null;
+  link: string | null;
 }
 
 function getSupabase() {
@@ -38,29 +57,75 @@ function getSupabase() {
   );
 }
 
-async function insertPost(post: SynopticPost): Promise<void> {
-  const title =
-    post.title ??
-    post.content?.slice(0, 120) ??
-    post.text?.slice(0, 120) ??
-    "Synoptic post";
+/** Parse SEC EDGAR filing text block into structured fields. */
+function parseSecFiling(text: string): SecFiling | null {
+  // Must contain at least "Type:" to be treated as an SEC filing
+  if (!text.includes("Type:")) return null;
 
-  const body = post.content ?? post.body ?? post.text ?? null;
-  const url =
-    post.url ??
-    post.link ??
-    `https://synoptic.com/post/${post.id ?? Date.now()}`;
+  const lines = text.split("\n");
+  const get = (prefix: string): string | null =>
+    lines.find((l) => l.startsWith(prefix))?.slice(prefix.length).trim() ?? null;
 
-  const publishedAt =
-    post.published_at ?? post.created_at ?? post.timestamp ?? null;
+  return {
+    accession: get("Filed file:"),
+    formType: get("Type:"),
+    company: get("Company Name:"),
+    link: get("Link:"),
+  };
+}
 
+async function handleEnvelope(envelope: SynopticEnvelope): Promise<void> {
+  if (envelope.event !== "stream.post.created") return;
+
+  const { id, text } = envelope.data;
+  if (!text) return;
+
+  // Try to parse as SEC filing first
+  const filing = parseSecFiling(text);
+
+  if (filing) {
+    // Apply same block list as the EDGAR RSS poller
+    if (filing.formType && BLOCKED_FORM_TYPES.has(filing.formType)) {
+      console.log(`[synoptic] Skipping blocked form type: ${filing.formType}`);
+      return;
+    }
+
+    const title =
+      filing.company && filing.formType
+        ? `${filing.formType} — ${filing.company}`
+        : text.split("\n")[0].slice(0, 120);
+
+    const url =
+      filing.link ?? `https://synoptic.com/post/${id ?? Date.now()}`;
+
+    await upsertArticle({ title, body: text, url });
+    return;
+  }
+
+  // Generic post (news, alerts, etc.)
+  const firstLine = text.split("\n")[0].trim();
+  const title = firstLine.slice(0, 120) || "Synoptic post";
+  const url = `https://synoptic.com/post/${id ?? Date.now()}`;
+
+  await upsertArticle({ title, body: text, url });
+}
+
+async function upsertArticle({
+  title,
+  body,
+  url,
+}: {
+  title: string;
+  body: string;
+  url: string;
+}): Promise<void> {
   const row: ArticleInsert = {
     title: title.trim(),
-    body: body?.trim() ?? null,
+    body: body.trim(),
     source: "Synoptic",
-    author: post.author ?? null,
+    author: null,
     url,
-    published_at: publishedAt ? new Date(publishedAt).toISOString() : null,
+    published_at: null,
     status: "PENDING",
     is_breaking: false,
   };
@@ -73,7 +138,7 @@ async function insertPost(post: SynopticPost): Promise<void> {
   if (error) {
     console.error(`[synoptic] Insert error: ${error.message}`);
   } else {
-    console.log(`[synoptic] +1 post: ${title.slice(0, 80)}`);
+    console.log(`[synoptic] +1: ${title.slice(0, 80)}`);
   }
 }
 
@@ -82,28 +147,22 @@ function connect(apiKey: string, attempt = 0): void {
   let ws: import("ws").WebSocket;
 
   try {
-    // Use dynamic import so the ws package is optional at module load time
     import("ws").then(({ default: WebSocket }) => {
       ws = new WebSocket(url);
 
       ws.onopen = () => {
         console.log("[synoptic] WebSocket connected");
-        attempt = 0; // reset backoff on successful connect
+        attempt = 0;
       };
 
       ws.onmessage = async (event) => {
         try {
-          const data =
+          const envelope: SynopticEnvelope =
             typeof event.data === "string"
               ? JSON.parse(event.data)
               : JSON.parse(event.data.toString());
 
-          // Log raw structure of first few messages to identify field names
-          console.log("[synoptic] RAW MESSAGE:", JSON.stringify(data).slice(0, 500));
-
-          // Handle array or single post
-          const posts: SynopticPost[] = Array.isArray(data) ? data : [data];
-          await Promise.all(posts.map(insertPost));
+          await handleEnvelope(envelope);
         } catch (err) {
           console.warn(
             `[synoptic] Failed to parse message: ${(err as Error).message}`
@@ -112,7 +171,9 @@ function connect(apiKey: string, attempt = 0): void {
       };
 
       ws.onerror = (err) => {
-        console.error(`[synoptic] WebSocket error: ${(err as ErrorEvent).message ?? "unknown"}`);
+        console.error(
+          `[synoptic] WebSocket error: ${(err as ErrorEvent).message ?? "unknown"}`
+        );
       };
 
       ws.onclose = () => {
@@ -121,7 +182,9 @@ function connect(apiKey: string, attempt = 0): void {
       };
     });
   } catch (err) {
-    console.error(`[synoptic] Failed to create WebSocket: ${(err as Error).message}`);
+    console.error(
+      `[synoptic] Failed to create WebSocket: ${(err as Error).message}`
+    );
     scheduleReconnect(apiKey, attempt + 1);
   }
 }
@@ -140,7 +203,6 @@ function scheduleReconnect(apiKey: string, attempt: number): void {
 export function startSynopticFeed(): void {
   const apiKey = process.env.SYNOPTIC_API_KEY;
   if (!apiKey) {
-    // Silently skip — activates automatically once key is added to env
     return;
   }
   console.log("[synoptic] Starting WebSocket feed...");
