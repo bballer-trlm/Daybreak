@@ -27,7 +27,7 @@ const RECONNECT_MAX_MS = 60_000;
 const BLOCKED_FORM_TYPES = new Set([
   "424B2", "424B3", "424B5",
   "FWP",
-  "497", "497K",
+  "497", "497K", "497VPU", "497VPI",
   "485BPOS", "485APOS", "485BXT",
   "N-14", "N-14/A",
   "N-CEN", "N-CEN/A",

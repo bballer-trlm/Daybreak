@@ -89,7 +89,7 @@ function parseSummaryItems(summaryHtml: string): string[] {
 const BLOCKED_FORM_TYPES = new Set([
   "424B2", "424B3", "424B5",          // shelf prospectus supplements (424B4 kept — dilutive offering signal)
   "FWP",                               // free writing prospectus
-  "497", "497K",                       // mutual fund prospectus / summary prospectus
+  "497", "497K", "497VPU", "497VPI",   // mutual fund / variable annuity prospectus
   "485BPOS", "485APOS", "485BXT",     // mutual fund post-effective registration amendments (boilerplate)
   "N-14", "N-14/A",                   // mutual fund registration
   "N-CEN", "N-CEN/A",                 // annual report for registered investment companies
