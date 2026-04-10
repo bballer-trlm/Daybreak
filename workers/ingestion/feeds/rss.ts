@@ -27,6 +27,10 @@ export const FEEDS: FeedConfig[] = [
   { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/US.xml" },
   { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/YourMoney.xml" },
   { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml" },
+
+  // Press releases
+  { source: "Business Wire", url: "https://feed.businesswire.com/rss/home/?rss=G1&rssid=20" },      // all news
+  { source: "Business Wire", url: "https://feed.businesswire.com/rss/home/?rss=G6&rssid=20" },      // financial news
 ];
 
 // Workers use the service role key — no Database generic needed since the
