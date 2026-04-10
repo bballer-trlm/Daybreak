@@ -104,14 +104,15 @@ async function main() {
     process.exit(0);
   });
 
-  // RSS + EDGAR feed pollers: initial poll on startup, then every 60 seconds
+  // RSS + EDGAR feed pollers: initial poll on startup, then on interval
+  // NYT API: 500 req/day limit — 4 sections × 96 polls/day = 384 req/day at 15 min interval
   console.log("[worker] Starting RSS + EDGAR feed pollers...");
   await pollAllFeeds();
   await pollAllEdgarFeeds();
   await pollAllNytFeeds();
   setInterval(pollAllFeeds, 60_000);
   setInterval(pollAllEdgarFeeds, 60_000);
-  setInterval(pollAllNytFeeds, 60_000);
+  setInterval(pollAllNytFeeds, 15 * 60_000);
 
   console.log("[worker] Ready. Listening for articles...");
 }

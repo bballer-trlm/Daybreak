@@ -27,7 +27,6 @@ export const FEEDS: FeedConfig[] = [
   { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/US.xml" },
   { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/YourMoney.xml" },
   { source: "NY Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml" },
-  { source: "Hunterbrook", url: "https://hntrbrk.com/feed/" },
 ];
 
 // Workers use the service role key — no Database generic needed since the

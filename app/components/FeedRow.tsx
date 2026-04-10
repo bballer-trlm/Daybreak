@@ -7,6 +7,7 @@ const SOURCE_ABBREV: Record<string, string> = {
   "The Wall Street Journal": "WSJ",
   "Financial Times": "FT",
   CNBC: "CNBC",
+  "NY Times": "NYT",
   "Seeking Alpha": "SA",
   "Yahoo Finance": "YFN",
   MarketWatch: "MKW",
@@ -48,10 +49,11 @@ export default function FeedRow({ article, isNew, isSelected, onClick }: Props) 
   else if (article.is_breaking) rowBg = "rgba(245,158,11,0.04)";
 
   // Top 2 tickers by absolute score
-  const topTickers = (article.entities ?? [])
-    .filter((e) => e.ticker)
-    .slice(0, 2)
-    .map((e) => e.ticker!);
+  const topTickers = [...new Set(
+    (article.entities ?? [])
+      .filter((e) => e.ticker)
+      .map((e) => e.ticker!)
+  )].slice(0, 2);
 
   return (
     <div
