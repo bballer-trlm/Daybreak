@@ -153,6 +153,63 @@ function parseIndexUrl(
   };
 }
 
+/**
+ * Return the best character offset to start extracting from in a stripped
+ * SEC filing document. Skips cover page boilerplate and seeks to the first
+ * section that actually contains analyst-relevant text.
+ */
+function findBestTextOffset(text: string, formType: string): number {
+  const clean = formType.replace("/A", "").toUpperCase();
+
+  const SECTION_MARKERS: Record<string, string[]> = {
+    "S-1": [
+      "PROSPECTUS SUMMARY",
+      "Prospectus Summary",
+      "SUMMARY OF THE OFFERING",
+      "SUMMARY OF OFFERING",
+      "OUR COMPANY",
+      "Our Company",
+      "BUSINESS OVERVIEW",
+      "Business Overview",
+      "ABOUT US",
+    ],
+    "10-K": [
+      "MANAGEMENT'S DISCUSSION AND ANALYSIS",
+      "Management's Discussion and Analysis",
+      "RESULTS OF OPERATIONS",
+      "Results of Operations",
+      "Item 7.",
+      "ITEM 7.",
+    ],
+    "10-Q": [
+      "MANAGEMENT'S DISCUSSION AND ANALYSIS",
+      "Management's Discussion and Analysis",
+      "RESULTS OF OPERATIONS",
+      "Results of Operations",
+      "Item 2.",
+      "ITEM 2.",
+    ],
+    "S-11": [
+      "PROSPECTUS SUMMARY",
+      "Prospectus Summary",
+      "OUR COMPANY",
+      "Our Company",
+    ],
+  };
+
+  const markers = SECTION_MARKERS[clean] ?? [];
+  const maxSearchEnd = Math.floor(text.length * 0.65); // don't seek past 65% of doc
+
+  for (const marker of markers) {
+    const idx = text.indexOf(marker);
+    if (idx > 50 && idx < maxSearchEnd) {
+      return idx;
+    }
+  }
+
+  return 0; // fallback: start from beginning (8-K, Form 4, unknown types)
+}
+
 // ---------- Main export ----------
 
 export async function fetchSecContent(
@@ -207,8 +264,10 @@ export async function fetchSecContent(
     (no) => ITEM_LABELS[no] ?? `Item ${no}`
   );
 
-  // Limit to first 4000 chars for the pipeline prompt
-  const primaryText = rawText.slice(0, 4000);
+  // Seek to the most information-dense section of the document.
+  // First 4000 chars of an S-1/10-K is always legal boilerplate — not useful.
+  const offset = findBestTextOffset(rawText, formType);
+  const primaryText = rawText.slice(offset, offset + 8000);
 
   return {
     form_type: formType,

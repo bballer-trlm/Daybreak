@@ -259,6 +259,7 @@ async function runSummarization(article: {
   entities: ExtractedEntity[];
   sec_items?: string[];
   sec_item_labels?: string[];
+  sec_form_type?: string;
 }): Promise<SummaryResult> {
   const entitiesCtx = article.entities
     .slice(0, 3)
@@ -269,6 +270,23 @@ async function runSummarization(article: {
     article.sec_items && article.sec_items.length > 0
       ? `\nFiling items: ${article.sec_items.map((no, i) => `${no} – ${article.sec_item_labels?.[i] ?? no}`).join(", ")}`
       : "";
+
+  // Per-form-type extraction guidance so the model knows what to look for
+  const cleanFormType = (article.sec_form_type ?? "").replace("/A", "").toUpperCase();
+  const formGuidance: Record<string, string> = {
+    "S-1": "Extract: company business description, IPO deal size and price range if stated, use of proceeds, key risks mentioned.",
+    "10-K": "Extract: full-year revenue and net income vs. prior year (with % change), EPS, management outlook or guidance, any notable one-time items.",
+    "10-Q": "Extract: quarterly revenue and EPS vs. prior-year quarter (with % change), any guidance updates, notable items from MD&A.",
+    "8-K": "Extract: the specific triggering event, key financial figures or terms, and the direct impact on the company.",
+    "424B4": "Extract: offering size (shares and dollar amount), pricing, use of proceeds, dilution impact.",
+  };
+  const secFormGuidance = formGuidance[cleanFormType]
+    ? `\nSEC form focus — ${formGuidance[cleanFormType]}`
+    : "";
+
+  const isSecFiling = article.source === "SEC EDGAR" || article.source === "Synoptic";
+  // Use Sonnet for SEC filings — the extracted document text is dense and nuanced
+  const model = isSecFiling && article.body && article.body.length > 200 ? MODEL_SMART : MODEL_FAST;
 
   const system = `You are a financial news analyst summarizing articles for equity traders.
 Write a concise, factual summary and extract the most tradeable callouts.
@@ -283,17 +301,18 @@ Rules:
 - Lead with the most market-moving fact
 - Use concrete numbers/percentages from the text when available
 - Never say "the article says" or "according to" — state facts directly
-- key_points should be self-contained without reading the summary first`;
+- key_points should be self-contained without reading the summary first
+- If the document text is boilerplate with no useful data, say so honestly in the summary${secFormGuidance}`;
 
   return callJson<SummaryResult>(
-    MODEL_FAST,
+    model,
     system,
     `Title: ${article.title}
 Source: ${article.source}
 Category: ${article.category ?? "general"}${secCtx}
 Entities: ${entitiesCtx || "(none)"}
-Body: ${article.body?.slice(0, 1000) ?? "(no body)"}`,
-    512,
+Body: ${article.body?.slice(0, 4000) ?? "(no body)"}`,
+    800,
   );
 }
 
@@ -611,6 +630,7 @@ export async function processArticle(articleId: string): Promise<void> {
       entities,
       sec_items: secContent?.items_found,
       sec_item_labels: secContent?.item_labels,
+      sec_form_type: secContent?.form_type,
     });
     await writeEnrichment(articleId, "summary", summaryResult as unknown as Record<string, unknown>);
   } catch (err) {
