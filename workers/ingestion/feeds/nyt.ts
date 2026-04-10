@@ -15,7 +15,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { ArticleInsert } from "../../../lib/supabase/types";
 
 const NYT_BASE = "https://api.nytimes.com/svc/news/v3/content/nyt";
-const SECTIONS = ["business", "technology", "u.s.", "world"];
+const SECTIONS = ["business", "technology", "u.s.", "dealbook"];
 
 interface NytNewsItem {
   title: string;
