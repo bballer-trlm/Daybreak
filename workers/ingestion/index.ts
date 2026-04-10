@@ -3,7 +3,7 @@ import { processArticle } from "./pipeline";
 import { getRedisConnectionOptions, createIngestQueue, createIngestWorker } from "./queue";
 import { pollAllFeeds } from "./feeds/rss";
 import { pollAllEdgarFeeds } from "./feeds/edgar";
-import { pollAllNytFeeds } from "./feeds/nyt";
+import { startSynopticFeed } from "./feeds/synoptic";
 
 const SAFETY_NET_INTERVAL_MS = 60_000;
 const SAFETY_NET_RETRY_CUTOFF_MS = 5 * 60_000;   // articles stuck 5–60 min: retry
@@ -109,10 +109,12 @@ async function main() {
   console.log("[worker] Starting RSS + EDGAR feed pollers...");
   await pollAllFeeds();
   await pollAllEdgarFeeds();
-  await pollAllNytFeeds();
+  startSynopticFeed();
+  // NYT API paused — hitting 429s, waiting for rate limit to reset
+  // await pollAllNytFeeds();
   setInterval(pollAllFeeds, 30_000);
   setInterval(pollAllEdgarFeeds, 30_000);
-  setInterval(pollAllNytFeeds, 6 * 60_000);
+  // setInterval(pollAllNytFeeds, 6 * 60_000);
 
   console.log("[worker] Ready. Listening for articles...");
 }
