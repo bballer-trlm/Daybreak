@@ -9,18 +9,29 @@ const MODEL_FAST = "claude-haiku-4-5-20251001"; // screener + classifier
 const MODEL_SMART = "claude-sonnet-4-6"; // entity extraction + scoring
 const MODEL_TIMEOUT_MS = 15_000;
 
+// Module-level singletons — creating a new client per call causes memory leaks
+// under high concurrency (10 parallel articles × 20+ calls each = hundreds of instances).
+let _anthropic: Anthropic | null = null;
+let _supabase: ReturnType<typeof createClient> | null = null;
+
 function getAnthropic() {
-  return new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-    timeout: MODEL_TIMEOUT_MS,
-  });
+  if (!_anthropic) {
+    _anthropic = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY,
+      timeout: MODEL_TIMEOUT_MS,
+    });
+  }
+  return _anthropic;
 }
 
 function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Supabase env vars missing");
-  return createClient(url, key);
+  if (!_supabase) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) throw new Error("Supabase env vars missing");
+    _supabase = createClient(url, key);
+  }
+  return _supabase;
 }
 
 async function writeEnrichment(
@@ -346,6 +357,48 @@ Top entities:\n${topEntities || "(none)"}`
   );
 }
 
+// ---------- Canonical entity resolution ----------
+
+/**
+ * Try to normalize an extracted entity name/ticker against canonical_entities.
+ * Checks by ticker first (precise), then by alias containment (fuzzy).
+ * Returns null if no match — caller continues with Claude's extracted values.
+ */
+async function resolveCanonicalEntity(
+  name: string,
+  ticker: string | null
+): Promise<{ canonical_name: string; ticker: string | null } | null> {
+  const supabase = getSupabaseAdmin();
+
+  // Ticker lookup (most precise — avoids alias collisions)
+  if (ticker) {
+    const { data: byTicker } = await supabase
+      .from("canonical_entities")
+      .select("canonical_name, tickers")
+      .contains("tickers", [ticker.toUpperCase()])
+      .eq("is_active", true)
+      .maybeSingle();
+    if (byTicker) {
+      const tickers = byTicker.tickers as string[];
+      return { canonical_name: byTicker.canonical_name, ticker: tickers[0] ?? ticker };
+    }
+  }
+
+  // Alias lookup (fuzzy — lowercased name match)
+  const { data: byAlias } = await supabase
+    .from("canonical_entities")
+    .select("canonical_name, tickers")
+    .contains("aliases", [name.toLowerCase()])
+    .eq("is_active", true)
+    .maybeSingle();
+  if (byAlias) {
+    const tickers = byAlias.tickers as string[];
+    return { canonical_name: byAlias.canonical_name, ticker: tickers[0] ?? null };
+  }
+
+  return null;
+}
+
 // ---------- Main pipeline entry point ----------
 
 export async function processArticle(articleId: string): Promise<void> {
@@ -508,6 +561,13 @@ export async function processArticle(articleId: string): Promise<void> {
 
     // Upsert entities + entity_impacts
     for (const entity of entities) {
+      // Normalize name/ticker against canonical_entities (GIN-indexed, fast)
+      const canonical = await resolveCanonicalEntity(entity.name, entity.ticker);
+      if (canonical) {
+        entity.name = canonical.canonical_name;
+        if (canonical.ticker) entity.ticker = canonical.ticker;
+      }
+
       let entityId: string;
       const { data: existing } = await supabase
         .from("entities")

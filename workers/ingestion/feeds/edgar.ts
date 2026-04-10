@@ -87,12 +87,13 @@ function parseSummaryItems(summaryHtml: string): string[] {
 
 // Form types to drop at ingestion — no market signal, pure boilerplate
 const BLOCKED_FORM_TYPES = new Set([
-  "424B2", "424B3", "424B5",  // shelf prospectus supplements (424B4 kept — dilutive offering signal)
-  "FWP",                       // free writing prospectus
-  "497", "497K",               // mutual fund prospectus / summary prospectus
-  "N-14", "N-14/A",           // mutual fund registration
-  "N-CEN", "N-CEN/A",         // annual report for registered investment companies
-  "N-PORT", "N-PORT/A",       // monthly portfolio holdings (funds)
+  "424B2", "424B3", "424B5",          // shelf prospectus supplements (424B4 kept — dilutive offering signal)
+  "FWP",                               // free writing prospectus
+  "497", "497K",                       // mutual fund prospectus / summary prospectus
+  "485BPOS", "485APOS", "485BXT",     // mutual fund post-effective registration amendments (boilerplate)
+  "N-14", "N-14/A",                   // mutual fund registration
+  "N-CEN", "N-CEN/A",                 // annual report for registered investment companies
+  "N-PORT", "N-PORT/A",               // monthly portfolio holdings (funds)
 ]);
 
 /**
