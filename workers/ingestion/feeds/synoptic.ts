@@ -98,6 +98,9 @@ function connect(apiKey: string, attempt = 0): void {
               ? JSON.parse(event.data)
               : JSON.parse(event.data.toString());
 
+          // Log raw structure of first few messages to identify field names
+          console.log("[synoptic] RAW MESSAGE:", JSON.stringify(data).slice(0, 500));
+
           // Handle array or single post
           const posts: SynopticPost[] = Array.isArray(data) ? data : [data];
           await Promise.all(posts.map(insertPost));
